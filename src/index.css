@@ -1,0 +1,15 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@keyframes scanline {
+  0% { top: 0%; }
+  100% { top: 100%; }
+}
+.animate-scanline {
+  animation: scanline 1.8s ease-in-out infinite alternate;
+}
+
+html, body, #root {
+  height: 100%;
+}
