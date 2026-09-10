@@ -3,7 +3,7 @@
 --
 -- This schema assumes you've enabled Firebase Auth as a Supabase
 -- "Third-Party Auth" provider (see README → "Wire Firebase into Supabase").
--- Once that's configured, auth.uid() resolves to the Firebase user's UID
+-- Once that's configured, auth.jwt() ->> 'sub' resolves to the Firebase user's UID (a plain string, not a Postgres uuid)
 -- for any request made with a Firebase ID token, and auth.jwt() ->> 'email'
 -- gives you their email.
 
@@ -66,7 +66,7 @@ alter table profiles enable row level security;
 -- Helper: current caller's role, or null if not signed in / no profile.
 create or replace function current_role_name() returns text
 language sql stable as $$
-  select role from profiles where id = auth.uid()
+  select role from profiles where id = (auth.jwt() ->> 'sub')
 $$;
 
 -- employees --------------------------------------------------------------
@@ -86,8 +86,8 @@ create policy "admin/hr manage employees"
 
 create policy "employee can update own biometric enrollment"
   on employees for update
-  using (id = (select employee_id from profiles where id = auth.uid()))
-  with check (id = (select employee_id from profiles where id = auth.uid()));
+  using (id = (select employee_id from profiles where id = (auth.jwt() ->> 'sub')))
+  with check (id = (select employee_id from profiles where id = (auth.jwt() ->> 'sub')));
 
 -- attendance_logs ----------------------------------------------------------
 create policy "anyone can insert attendance from kiosk"
@@ -100,7 +100,7 @@ create policy "admin/hr read all attendance"
 
 create policy "employee reads own attendance"
   on attendance_logs for select
-  using (employee_id = (select employee_id from profiles where id = auth.uid()));
+  using (employee_id = (select employee_id from profiles where id = (auth.jwt() ->> 'sub')));
 
 -- devices --------------------------------------------------------------
 create policy "anyone can read devices"
@@ -115,7 +115,7 @@ create policy "admin manages devices"
 -- profiles --------------------------------------------------------------
 create policy "user reads own profile"
   on profiles for select
-  using (id = auth.uid());
+  using (id = (auth.jwt() ->> 'sub'));
 
 create policy "admin manages profiles"
   on profiles for all
