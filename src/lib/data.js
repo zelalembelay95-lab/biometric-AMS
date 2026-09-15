@@ -54,3 +54,11 @@ export async function setDeviceActive(id, active) {
   if (error) throw error;
   return data;
 }
+
+/* Profiles (login accounts) --------------------------------------------*/
+
+export async function fetchProfiles() {
+  const { data, error } = await supabase.from("profiles").select("*").order("email");
+  if (error) throw error;
+  return data;
+}
