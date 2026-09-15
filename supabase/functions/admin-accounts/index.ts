@@ -27,7 +27,7 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 import { createRemoteJWKSet, jwtVerify } from "npm:jose@5";
 
 const FIREBASE_PROJECT_ID = Deno.env.get("biometric-ams")!;
-const SERVICE_ACCOUNT = JSON.parse(Deno.env.get({"
+const SERVICE_ACCOUNT = JSON.parse(Deno.env.get({
   "type": "service_account",
   "project_id": "biometric-ams",
   "private_key_id": "5afe7bff237a9cfa454d16274d6d58b7e536ef52",
@@ -39,7 +39,7 @@ const SERVICE_ACCOUNT = JSON.parse(Deno.env.get({"
   "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
   "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/firebase-adminsdk-fbsvc%40biometric-ams.iam.gserviceaccount.com",
   "universe_domain": "googleapis.com"
-"}
+}
 )!);
 
 if (!getApps().length) {
