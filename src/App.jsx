@@ -4,6 +4,7 @@ import {
   Settings, LogOut, CheckCircle2, XCircle, Sun, UtensilsCrossed, Moon,
   ChevronRight, Search, Plus, Trash2, Smartphone, Monitor, AlertTriangle,
   Download, Filter, BadgeCheck, Building2, Radar, X, ArrowLeft, Loader2,
+  KeyRound, RefreshCw,
 } from "lucide-react";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -12,9 +13,11 @@ import {
 import { useAuth } from "./lib/AuthContext.jsx";
 import {
   fetchEmployees, insertEmployee, updateEmployeeRow, deleteEmployeeRow,
-  fetchLogs, insertLog, fetchDevices, setDeviceActive,
+  fetchLogs, insertLog, fetchDevices, setDeviceActive, fetchProfiles,
 } from "./lib/data.js";
+import { createLoginAccount, resetAccountPassword, setAccountRole, deleteLoginAccount } from "./lib/adminAccounts.js";
 import { WEBAUTHN_SUPPORTED, registerPlatformBiometric, verifyPlatformBiometric } from "./lib/webauthn.js";
+import { loadFaceModels, getFaceDescriptor, isSamePerson } from "./lib/faceRecognition.js";
 
 const DEPARTMENTS = ["Engineering", "Operations", "Sales", "Finance", "HR"];
 const AVATAR_PALETTE = ["#6366F1", "#F59E0B", "#10B981", "#EC4899", "#38BDF8", "#F97316", "#A78BFA", "#34D399"];
@@ -92,7 +95,7 @@ function FullLoader({ label = "Loading…" }) {
     </div>
   );
 }
-function TopBar({ title, subtitle, onExit }) {
+function TopBar({ title, subtitle, onExit, signsOut }) {
   return (
     <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800 bg-slate-950/80 backdrop-blur">
       <div className="flex items-center gap-2">
@@ -103,7 +106,7 @@ function TopBar({ title, subtitle, onExit }) {
         </div>
       </div>
       <button onClick={onExit} className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-300 transition-colors">
-        <LogOut size={13} /> Exit
+        <LogOut size={13} /> {signsOut ? "Sign Out" : "Exit"}
       </button>
     </div>
   );
@@ -247,6 +250,8 @@ function Kiosk({ employees, logs, onLogAdded, onExit }) {
   }, []);
   useEffect(() => () => stopCam(), [stopCam]);
 
+  useEffect(() => { loadFaceModels(); }, []); // warm up in the background
+
   async function startFaceScan() {
     setMethod("face");
     setStep("scanning");
@@ -255,8 +260,27 @@ function Kiosk({ employees, logs, onLogAdded, onExit }) {
       streamRef.current = stream;
       if (videoRef.current) { videoRef.current.srcObject = stream; await videoRef.current.play(); }
       setCamOn(true);
-    } catch (e) { setCamOn(false); }
-    runSimulated();
+    } catch (e) {
+      finish(false, "camera_denied");
+      return;
+    }
+    if (!emp.face_descriptor) {
+      // Camera works, but this person has no stored template to compare against.
+      setTimeout(() => finish(false, "not_enrolled"), 1200);
+      return;
+    }
+    try {
+      await loadFaceModels();
+      await new Promise((r) => setTimeout(r, 900)); // let exposure/focus settle
+      const live = await getFaceDescriptor(videoRef.current);
+      if (!live) {
+        finish(false, "no_face_detected");
+        return;
+      }
+      finish(isSamePerson(live, emp.face_descriptor), "face_mismatch");
+    } catch (e) {
+      finish(false, "model_error");
+    }
   }
 
   async function startFingerScan() {
@@ -422,12 +446,20 @@ function Kiosk({ employees, logs, onLogAdded, onExit }) {
                       {result.reason === "already_logged" ? "Already Checked In"
                         : result.reason === "biometric_failed" ? "Verification Failed"
                         : result.reason === "write_failed" ? "Connection Error"
+                        : result.reason === "camera_denied" ? "Camera Unavailable"
+                        : result.reason === "no_face_detected" ? "No Face Detected"
+                        : result.reason === "face_mismatch" ? "Face Didn't Match"
+                        : result.reason === "model_error" ? "Recognition Error"
                         : "Biometric Not Enrolled"}
                     </div>
                     <div className="text-sm text-slate-400 mt-1 max-w-xs">
                       {result.reason === "already_logged" ? `${CHECKPOINTS.find((c) => c.key === checkpoint).label} was already recorded today.`
                         : result.reason === "biometric_failed" ? "Fingerprint didn't match or the prompt was cancelled. Try again."
                         : result.reason === "write_failed" ? "Couldn't reach the database. Check your connection and try again."
+                        : result.reason === "camera_denied" ? "Allow camera access in your browser and try again."
+                        : result.reason === "no_face_detected" ? "Center your face in frame, in good lighting, and try again."
+                        : result.reason === "face_mismatch" ? "This doesn't match the enrolled face for this employee."
+                        : result.reason === "model_error" ? "Face recognition failed to load. Refresh and try again."
                         : `Ask HR to enroll your ${method} in the employee portal.`}
                     </div>
                   </>
@@ -488,7 +520,7 @@ function HRConsole({ employees, logs, onExit }) {
     <div className="min-h-full flex">
       <SideNav items={items} active={tab} onSelect={setTab} roleLabel="HR Console" />
       <div className="flex-1 flex flex-col min-w-0">
-        <TopBar title="HR Console" subtitle="Workforce attendance oversight" onExit={onExit} />
+        <TopBar title="HR Console" subtitle="Workforce attendance oversight" onExit={onExit} signsOut />
         <div className="flex-1 overflow-y-auto p-6 space-y-6">
           {tab === "overview" && (
             <>
@@ -643,7 +675,7 @@ function EmployeePortal({ employees, logs, myEmployeeId, onEmployeeUpdated, onEx
 
   return (
     <div className="min-h-full flex flex-col">
-      <TopBar title="Employee Portal" subtitle={emp.name} onExit={onExit} />
+      <TopBar title="Employee Portal" subtitle={emp.name} onExit={onExit} signsOut />
       <div className="p-6 max-w-4xl mx-auto w-full space-y-6">
         {!myEmployeeId && (
           <div className="flex items-center gap-3">
@@ -672,16 +704,17 @@ function EmployeePortal({ employees, logs, myEmployeeId, onEmployeeUpdated, onEx
 
         <Panel title="Biometric Enrollment">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <EnrollCard icon={ScanFace} label="Face" enrolled={emp.face_enrolled}
-              onEnroll={() => patch({ face_enrolled: true })} onRemove={() => patch({ face_enrolled: false })} />
+            <FaceEnrollCard enrolled={emp.face_enrolled}
+              onEnroll={(descriptor) => patch({ face_enrolled: true, face_descriptor: descriptor })}
+              onRemove={() => patch({ face_enrolled: false, face_descriptor: null })} />
             <EnrollCard icon={Fingerprint} label="Fingerprint" enrolled={emp.finger_enrolled} employee={emp} useWebAuthn
               onEnroll={(credId) => patch({ finger_enrolled: true, fp_credential_id: credId })}
               onRemove={() => patch({ finger_enrolled: false, fp_credential_id: null })} />
           </div>
           <p className="text-[11px] text-slate-600 mt-3">
-            {WEBAUTHN_SUPPORTED
-              ? "Fingerprint enrollment triggers your device's real platform prompt — Touch ID, Windows Hello, or Android fingerprint/face unlock — via WebAuthn. Only a signed credential is stored; the raw fingerprint never leaves your device."
-              : "This browser doesn't expose a platform authenticator, so fingerprint enrollment falls back to a simulated capture."}
+            Face enrollment runs a real face-detection model in your browser and stores a numeric descriptor of your
+            face — never the photo itself. Fingerprint uses your device's real platform authenticator
+            {WEBAUTHN_SUPPORTED ? " (Touch ID, Windows Hello, or Android fingerprint/face unlock)." : ", though this browser doesn't expose one, so it falls back to a simulated capture."}
           </p>
         </Panel>
 
@@ -703,6 +736,80 @@ function EmployeePortal({ employees, logs, myEmployeeId, onEmployeeUpdated, onEx
           </div>
         </Panel>
       </div>
+    </div>
+  );
+}
+
+function FaceEnrollCard({ enrolled, onEnroll, onRemove }) {
+  const [capturing, setCapturing] = useState(false);
+  const [status, setStatus] = useState(null); // 'loading' | 'ready' | 'nomatch' | 'error'
+  const videoRef = useRef(null);
+  const streamRef = useRef(null);
+
+  function stop() {
+    if (streamRef.current) { streamRef.current.getTracks().forEach((t) => t.stop()); streamRef.current = null; }
+    setCapturing(false);
+    setStatus(null);
+  }
+  useEffect(() => () => stop(), []);
+
+  async function start() {
+    setCapturing(true);
+    setStatus("loading");
+    try {
+      await loadFaceModels();
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" } });
+      streamRef.current = stream;
+      if (videoRef.current) { videoRef.current.srcObject = stream; await videoRef.current.play(); }
+      setStatus("ready");
+    } catch (e) {
+      setStatus("error");
+    }
+  }
+
+  async function capture() {
+    setStatus("loading");
+    try {
+      const descriptor = await getFaceDescriptor(videoRef.current);
+      if (!descriptor) { setStatus("nomatch"); return; }
+      stop();
+      onEnroll(descriptor);
+    } catch (e) {
+      setStatus("error");
+    }
+  }
+
+  return (
+    <div className="border border-slate-800 rounded-lg p-4">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${enrolled ? "bg-emerald-500/10" : "bg-slate-800"}`}>
+            <ScanFace size={18} className={enrolled ? "text-emerald-400" : "text-slate-500"} />
+          </div>
+          <div><div className="text-sm text-slate-200">Face</div><div className="text-[11px] text-slate-500">{enrolled ? "Enrolled" : "Not enrolled"}</div></div>
+        </div>
+        {enrolled ? (
+          <button onClick={onRemove} className="text-xs text-red-400 hover:text-red-300">Reset</button>
+        ) : !capturing ? (
+          <button onClick={start} className="text-xs px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 rounded-lg text-white">Enroll</button>
+        ) : null}
+      </div>
+      {capturing && (
+        <div className="mt-3">
+          <div className="relative w-full aspect-video rounded-lg overflow-hidden bg-slate-950 border border-slate-800">
+            <video ref={videoRef} muted playsInline className="w-full h-full object-cover scale-x-[-1]" />
+          </div>
+          <div className="flex items-center gap-2 mt-2">
+            <button onClick={capture} disabled={status === "loading"}
+              className="flex-1 text-xs py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 rounded-lg text-white">
+              {status === "loading" ? "Loading…" : "Capture"}
+            </button>
+            <button onClick={stop} className="text-xs px-3 py-2 border border-slate-700 rounded-lg text-slate-400">Cancel</button>
+          </div>
+          {status === "nomatch" && <div className="text-[11px] text-amber-400 mt-2">No clear face detected — center your face in good lighting and try again.</div>}
+          {status === "error" && <div className="text-[11px] text-red-400 mt-2">Couldn't access the camera, or the recognition model failed to load.</div>}
+        </div>
+      )}
     </div>
   );
 }
@@ -752,10 +859,145 @@ function EnrollCard({ icon: Icon, label, enrolled, onEnroll, onRemove, employee,
 /*  ADMIN CONSOLE                                                         */
 /* ---------------------------------------------------------------------- */
 
-function AdminConsole({ employees, onEmployeesChanged, devices, onDevicesChanged, onExit }) {
+function LoginAccountsPanel({ profiles, employees, onProfilesChanged }) {
+  const [showAdd, setShowAdd] = useState(false);
+  const [form, setForm] = useState({ email: "", password: "", role: "employee", employeeId: employees[0]?.id || "" });
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  const [pwUid, setPwUid] = useState(null);
+  const [newPw, setNewPw] = useState("");
+  const empMap = Object.fromEntries(employees.map((e) => [e.id, e]));
+
+  async function create() {
+    setBusy(true); setError(null);
+    try {
+      const { uid } = await createLoginAccount({
+        email: form.email, password: form.password, role: form.role,
+        employeeId: form.role === "employee" ? form.employeeId : null,
+      });
+      onProfilesChanged([...profiles, {
+        id: uid, email: form.email, role: form.role,
+        employee_id: form.role === "employee" ? form.employeeId : null,
+      }]);
+      setForm({ email: "", password: "", role: "employee", employeeId: employees[0]?.id || "" });
+      setShowAdd(false);
+    } catch (e) {
+      setError(e.message || "Failed to create account");
+    } finally { setBusy(false); }
+  }
+
+  async function changeRole(p, role) {
+    const employeeId = role === "employee" ? (p.employee_id || employees[0]?.id || null) : null;
+    try {
+      await setAccountRole({ uid: p.id, role, employeeId });
+      onProfilesChanged(profiles.map((x) => (x.id === p.id ? { ...x, role, employee_id: employeeId } : x)));
+    } catch (e) { setError(e.message || "Failed to update role"); }
+  }
+
+  async function savePassword(uid) {
+    if (newPw.length < 6) { setError("Password must be at least 6 characters"); return; }
+    setBusy(true); setError(null);
+    try {
+      await resetAccountPassword({ uid, password: newPw });
+      setPwUid(null); setNewPw("");
+    } catch (e) { setError(e.message || "Failed to reset password"); } finally { setBusy(false); }
+  }
+
+  async function remove(uid) {
+    try {
+      await deleteLoginAccount({ uid });
+      onProfilesChanged(profiles.filter((p) => p.id !== uid));
+    } catch (e) { setError(e.message || "Failed to delete account"); }
+  }
+
+  return (
+    <Panel title="Login Accounts" action={
+      <button onClick={() => setShowAdd(true)} className="flex items-center gap-1.5 text-xs bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-1.5 rounded-lg">
+        <Plus size={13} /> Add Account
+      </button>
+    }>
+      {showAdd && (
+        <div className="mb-4 border border-slate-800 rounded-lg p-4 bg-slate-950/50 space-y-3">
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-slate-400 font-mono tracking-wide">NEW LOGIN ACCOUNT</span>
+            <button onClick={() => setShowAdd(false)}><X size={14} className="text-slate-500" /></button>
+          </div>
+          <input type="email" placeholder="Email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })}
+            className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-indigo-500" />
+          <input type="password" placeholder="Temporary password (min 6 characters)" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })}
+            className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-indigo-500" />
+          <div className="flex gap-3">
+            <select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}
+              className="flex-1 bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-indigo-500">
+              <option value="employee">Employee</option>
+              <option value="hr">HR</option>
+              <option value="admin">Admin</option>
+            </select>
+            {form.role === "employee" && (
+              <select value={form.employeeId} onChange={(e) => setForm({ ...form, employeeId: e.target.value })}
+                className="flex-1 bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-indigo-500">
+                {employees.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
+              </select>
+            )}
+          </div>
+          {error && <div className="text-xs text-red-400">{error}</div>}
+          <button onClick={create} disabled={busy || !form.email || form.password.length < 6}
+            className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-lg py-2 text-sm">
+            {busy ? "Creating…" : "Create Account"}
+          </button>
+          <div className="text-[11px] text-slate-600">
+            Creates a real Firebase sign-in — share this email/password with them directly so they can log in
+            (and change the password themselves once Firebase self-service is wired up).
+          </div>
+        </div>
+      )}
+
+      <div className="space-y-1.5">
+        {profiles.map((p) => (
+          <div key={p.id} className="flex items-center gap-3 py-2 border-b border-slate-900">
+            <div className="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center text-slate-400 shrink-0"><KeyRound size={14} /></div>
+            <div className="flex-1 min-w-0">
+              <div className="text-sm text-slate-200 truncate">{p.email}</div>
+              <div className="text-[11px] text-slate-500">
+                {p.role === "employee" && empMap[p.employee_id] ? `Employee · ${empMap[p.employee_id].name}` : p.role}
+              </div>
+            </div>
+            <select value={p.role} onChange={(e) => changeRole(p, e.target.value)}
+              className="bg-slate-950 border border-slate-700 rounded-lg px-2 py-1 text-xs text-slate-300 focus:outline-none focus:border-indigo-500">
+              <option value="employee">Employee</option>
+              <option value="hr">HR</option>
+              <option value="admin">Admin</option>
+            </select>
+            <button onClick={() => { setPwUid(p.id === pwUid ? null : p.id); setNewPw(""); setError(null); }}
+              className="text-slate-500 hover:text-indigo-400 p-1" title="Reset password">
+              <RefreshCw size={14} />
+            </button>
+            <button onClick={() => remove(p.id)} className="text-slate-600 hover:text-red-400 p-1" title="Delete account"><Trash2 size={14} /></button>
+          </div>
+        ))}
+        {profiles.length === 0 && <div className="text-center text-slate-600 py-8 text-sm">No login accounts yet</div>}
+      </div>
+
+      {pwUid && (
+        <div className="mt-4 border border-slate-800 rounded-lg p-4 bg-slate-950/50">
+          <div className="text-xs text-slate-400 font-mono tracking-wide mb-2">RESET PASSWORD</div>
+          <div className="flex gap-2">
+            <input type="password" placeholder="New password (min 6 characters)" value={newPw} onChange={(e) => setNewPw(e.target.value)}
+              className="flex-1 bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-indigo-500" />
+            <button onClick={() => savePassword(pwUid)} disabled={busy} className="px-4 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 rounded-lg text-white text-sm">Save</button>
+          </div>
+          {error && <div className="text-xs text-red-400 mt-2">{error}</div>}
+        </div>
+      )}
+    </Panel>
+  );
+}
+
+function AdminConsole({ employees, onEmployeesChanged, devices, onDevicesChanged, profiles, onProfilesChanged, onExit }) {
   const [tab, setTab] = useState("users");
   const items = [
-    { key: "users", label: "User Accounts", icon: Users },
+    { key: "users", label: "Employees", icon: Users },
+    { key: "accounts", label: "Login Accounts", icon: KeyRound },
     { key: "devices", label: "Devices", icon: Monitor },
     { key: "settings", label: "System Settings", icon: Settings },
   ];
@@ -794,10 +1036,10 @@ function AdminConsole({ employees, onEmployeesChanged, devices, onDevicesChanged
     <div className="min-h-full flex">
       <SideNav items={items} active={tab} onSelect={setTab} roleLabel="Admin Console" />
       <div className="flex-1 flex flex-col min-w-0">
-        <TopBar title="Admin Console" subtitle="Accounts, devices & configuration" onExit={onExit} />
+        <TopBar title="Admin Console" subtitle="Accounts, devices & configuration" onExit={onExit} signsOut />
         <div className="flex-1 overflow-y-auto p-6 space-y-6">
           {tab === "users" && (
-            <Panel title="User Accounts" action={
+            <Panel title="Employees" action={
               <button onClick={() => setShowAdd(true)} className="flex items-center gap-1.5 text-xs bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-1.5 rounded-lg">
                 <Plus size={13} /> Add Employee
               </button>
@@ -821,11 +1063,11 @@ function AdminConsole({ employees, onEmployeesChanged, devices, onDevicesChanged
                     </select>
                   </div>
                   <button onClick={addEmployee} disabled={busy} className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-lg py-2 text-sm">
-                    {busy ? "Creating…" : "Create Account"}
+                    {busy ? "Creating…" : "Create Employee"}
                   </button>
                   <div className="text-[11px] text-slate-600">
-                    This creates the employee record in Supabase. To let them sign in, also create a Firebase Authentication
-                    user for their email and add a matching row to the <code>profiles</code> table (see README).
+                    This is their workforce/attendance record. To let them actually sign in, create a login for them
+                    under the Login Accounts tab and link it to this employee.
                   </div>
                 </div>
               )}
@@ -840,6 +1082,9 @@ function AdminConsole({ employees, onEmployeesChanged, devices, onDevicesChanged
                 ))}
               </div>
             </Panel>
+          )}
+          {tab === "accounts" && (
+            <LoginAccountsPanel profiles={profiles} employees={employees} onProfilesChanged={onProfilesChanged} />
           )}
           {tab === "devices" && (
             <Panel title="Registered Devices">
@@ -885,6 +1130,7 @@ export default function App() {
   const [employees, setEmployees] = useState([]);
   const [logs, setLogs] = useState([]);
   const [devices, setDevices] = useState([]);
+  const [profiles, setProfiles] = useState([]);
   const [dataLoading, setDataLoading] = useState(false);
   const [dataError, setDataError] = useState(null);
 
@@ -896,14 +1142,27 @@ export default function App() {
     let cancelled = false;
     setDataLoading(true);
     setDataError(null);
-    Promise.all([fetchEmployees(), fetchLogs(), fetchDevices()])
-      .then(([e, l, d]) => { if (!cancelled) { setEmployees(e); setLogs(l); setDevices(d); } })
+    const loaders = [fetchEmployees(), fetchLogs(), fetchDevices()];
+    if (screen === "admin") loaders.push(fetchProfiles());
+    Promise.all(loaders)
+      .then(([e, l, d, p]) => {
+        if (cancelled) return;
+        setEmployees(e); setLogs(l); setDevices(d);
+        if (p) setProfiles(p);
+      })
       .catch((err) => { if (!cancelled) setDataError(err.message || "Failed to load data"); })
       .finally(() => { if (!cancelled) setDataLoading(false); });
     return () => { cancelled = true; };
   }, [screen, needsAuth, user]);
 
-  function exit() { setScreen(null); }
+  // Exiting an authenticated console (HR/Admin/Employee) also signs Firebase
+  // out. This matters most for a shared kiosk-style phone at a gate: without
+  // this, the next person tapping "Employee Portal" would silently land in
+  // the previous person's still-open session instead of a login prompt.
+  function exit() {
+    if (needsAuth && user) logout().catch(() => {});
+    setScreen(null);
+  }
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-200" style={{ fontFamily: "ui-sans-serif, system-ui, -apple-system, sans-serif" }}>
@@ -944,7 +1203,9 @@ export default function App() {
         dataError ? <ErrorState message={dataError} onExit={exit} /> :
         <AdminConsole
           employees={employees} onEmployeesChanged={setEmployees}
-          devices={devices} onDevicesChanged={setDevices} onExit={exit}
+          devices={devices} onDevicesChanged={setDevices}
+          profiles={profiles} onProfilesChanged={setProfiles}
+          onExit={exit}
         />
       )}
 
