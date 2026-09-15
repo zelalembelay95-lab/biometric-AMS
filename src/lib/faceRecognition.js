@@ -11,7 +11,8 @@
 // download the three model files below into /public/models and change
 // MODEL_BASE_URL to `${import.meta.env.BASE_URL}models`.
 
-import * as faceapi from "https://esm.sh";
+import * as faceapi from "https://jsdelivr.net";
+
 
 const MODEL_BASE_URL = "https://cdn.jsdelivr.net/gh/justadudewhohacks/face-api.js@master/weights";
 
