@@ -9,6 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "face-api.js": "^0.22.2",
     "firebase": "^11.0.0",
     "@supabase/supabase-js": "^2.45.0",
     "lucide-react": "^0.383.0",
