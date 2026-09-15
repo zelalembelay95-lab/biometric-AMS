@@ -1,10 +1,13 @@
-import { defineConfig } from "vite";
-import react from "@vitejs/plugin-react";
+import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
 
-// Base is "/" for a custom domain (Cloudflare). If you deploy to
-// https://<user>.github.io/<repo>/ instead of a custom domain, set
-// base to "/<repo>/" here or via the VITE_BASE_PATH env var.
+// https://vitejs.dev
 export default defineConfig({
   plugins: [react()],
-  base: process.env.VITE_BASE_PATH || "/",
-});
+  build: {
+    rollupOptions: {
+      // Tells Vite to ignore face-api.js during compilation since it's loaded via CDN
+      external: ['face-api.js'],
+    },
+  },
+})
