@@ -26,21 +26,8 @@ import { getAuth } from "npm:firebase-admin@12/auth";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { createRemoteJWKSet, jwtVerify } from "npm:jose@5";
 
-const FIREBASE_PROJECT_ID = Deno.env.get("biometric-ams")!;
-const SERVICE_ACCOUNT = JSON.parse(Deno.env.get({
-  "type": "service_account",
-  "project_id": "biometric-ams",
-  "private_key_id": "5afe7bff237a9cfa454d16274d6d58b7e536ef52",
-  "private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDVz5YAr7Ys4BpA\nDuN5weHBdjBHjgzs3hJOfr5phv4iN5GCFiYD8xHuHH0oBBjIxoPO1FFlJ4Spen1A\nxsVu/KemLd/pxT3o06gQHoBIOOnUFcmlrfqpp9MspEHSlcGX/xNhXCXQlnRp8lxD\n+j3ag61pOFJB2kBWaHu9VMRcLbCJUGtYKlmi19wp2966Sgbu+YMuMINly8NiXGVF\nO3yBrWRuEjkt1YB+MjYO9DTrY17/etXwtudmwtAUUKXLTjbL+LfB8fuRcwocQzGb\noTYog0Pj1XSFNC+fcEH/Ir3oCTVCBzk78kmt9U4VAtvnxemuUHbEt6qUiUHPSLsj\nSm5imLWjAgMBAAECggEAKJ+8fHzmPDiIREuP5P51inCOU8oloou/JrLmMt63QoEU\nYIccyftRGNDI5uWAYAV33cBxhqqvhhQD4F7j/GZ85BIrTRtw29/7OrTQ4ugNZYKO\nQbCAw+NjOEQtTXmuwtZwNDtx4+PyUn7+ENxnDDGgrTFKT8DMIJ7Rg/OrK2hy9mO8\nRWfyWF5slsUGToSOipRBqQKri49AF9Iq5DK5oYfY2zxkjFZkJUkivrKlk7640jbM\nOXAUGYsQkbIhYC2rY1qmz+whGFba+C8LUlAUTfGdQ1MJ7gLUnrs7azbJctZBJcUI\nr2J2giIT4AAY1XVsq7waWgNw1nQjh4+uh14McUH8AQKBgQD0HxyqC0hw1VEy/lyV\njXzbp2K/cFhDBj507RSll69fIWEA7BzxnQMIlgE5liTMRjOfW0KhTh3YmGiC577+\nTLq/ZkICQVO9dYDwHqck5drYf0JYGHFzLutNC1xT8sNwfajikMsd5p6dRPdX5DFm\n4fuFNBLpqSE5qlX5EWQ+1KZbgQKBgQDgNuktpytRkN6ch6YfaNSkSxgDURYrwiAF\nbihdSDQ/S27cIzu22lUWcyn96lTt/Hj/eyHslyPlNkehkRi6U4huZVSr1lUDezb1\nZGaQmh4IcaTZImdmeJTdyy/9s9Gm6jv+6hS2FkXfj+bSRT12MTgeQf1DTnr8zU0X\nnVvziV+zIwKBgQCVLxYjTHXejl3q3crSkf6FdUtBVnR5sS0l42REtee0KP/QwnoF\npUAfVRw2huzB8PzHG8wiK0zN+oWTye/MFDPjl6grHKUCGPbMxs66G8WbnFl84KMk\nEr40/QZVPvv0mLZGjtmx0ieIUIcfLRKLnvpIMsSECpmFVfToGpq6UtW/AQKBgE2D\njk+jKH21aNCSsOLQ+hqmf3G+Gb0dCrb142yEZtOu/2+Jmr5Xcu0k+VJ4Lc5s52Pj\nrNG/WsCGaHM512OrN1J7I6+YlKF0eoaRpEe/kDx5FXWfyEGL1GNtOHUsMoHTHtS9\nFlXxE0z70d/F4j63O2Byjd00B57YVxuf4kcqqfQjAoGAEV4UjuI7rLWT2VaUS2fM\nzb6HRD8QXLkQfKkZTnSTcHGM4SlJFvViajMtCeJNW9isMtyEcScZCawlJsqDqBKp\nqFu2nedajKnvNlGxXK0ayohmDzbV/t3++GR6uIPjUDruFpo3nlztZLRCkOX74J0K\nJo9vH33vp6gtYacD+sy+Fyo=\n-----END PRIVATE KEY-----\n",
-  "client_email": "firebase-adminsdk-fbsvc@biometric-ams.iam.gserviceaccount.com",
-  "client_id": "116581902296391242261",
-  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-  "token_uri": "https://oauth2.googleapis.com/token",
-  "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
-  "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/firebase-adminsdk-fbsvc%40biometric-ams.iam.gserviceaccount.com",
-  "universe_domain": "googleapis.com"
-}
-)!);
+const FIREBASE_PROJECT_ID = Deno.env.get("FIREBASE_PROJECT_ID")!;
+const SERVICE_ACCOUNT = JSON.parse(Deno.env.get("FIREBASE_SERVICE_ACCOUNT_JSON")!);
 
 if (!getApps().length) {
   initializeApp({ credential: cert(SERVICE_ACCOUNT) });
@@ -48,8 +35,8 @@ if (!getApps().length) {
 const fbAuth = getAuth();
 
 const supabaseAdmin = createClient(
-  Deno.env.get("https://twcapjafodjdnuebcqjk.supabase.co")!,
-  Deno.env.get("sb_secret_yXynKdO_yUUSbT1r87vFxg_IKxqE9mI")!
+  Deno.env.get("SUPABASE_URL")!,
+  Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
 );
 
 // Verifies the caller's Firebase ID token against Firebase's own public
@@ -81,7 +68,7 @@ async function requireAdmin(req: Request): Promise<string> {
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
 function json(body: unknown, status = 200) {
