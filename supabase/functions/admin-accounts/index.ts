@@ -26,26 +26,40 @@ import { getAuth } from "npm:firebase-admin@12/auth";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { createRemoteJWKSet, jwtVerify } from "npm:jose@5";
 
-const FIREBASE_PROJECT_ID = Deno.env.get(biometric-ams)!;
-const SERVICE_ACCOUNT = JSON.parse(Deno.env.get({
-  "type": "service_account",
-  "project_id": "biometric-ams",
-  "private_key_id": "dcbef653d0aa88755eed7d018ce867efa9fbbaeb",
-  "private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQC7xHOl6mFENq5P\nVzD47Bea/UvNAbs+DFCgRhVPUGJPN3fUcOh/djawKSYSrB4uK0Kq1270mE5ztZMC\nlm+V8hZPMNUm02kA74yYETj2BfGM2EWFOww337MXZQ/YuE6Geu5jZR2TkVKCGudD\n1do5dBYNw4W7xsbXqxkUTdlDmEmkGQC10V3Bg0bE8bnm/59B8KTR5SlBq+Tyd349\nHRshVWNk5peY3oWH28H+ZcHFQCscj6C1Z/oR5lzHwFuVuVEsqd9RCkmOA/g1h6o0\nQep9H6DtQy0TjKqEjuI+RAnS/22uMYdwdjRFk0EnIwwWpWh2PL8pbTRRyFAXRsiI\n3xztIiOfAgMBAAECggEABnidAJYyzmUaC4StZeWn9cDXdkrrVyiZWeS3S7mxIazI\nfvRVgBjJYZL/MCDXJt0wYu8Pp4WmQDuhsXvsNrioq75xmQNQFC/2dLAQZ/42lroh\nrzwkqUyW3NwLk9Zu1vQVgQfec2+VgLqIxyldQ33H7jlcnwuY8OW4UAzl8A45xBEx\np4K92sIL8la9mGk6/xEhzWrLKY98a2hc44faIfeRfWgBcVsvNBguhgkU9V6sLV5s\nSrBzZzgSDK69ZkrQXOaqA7XT9af6unwlj2dv36Lj96n5ET5Mzy98jxM/5BvYEWBO\nvH3oGFArQ7yeDDfr5CQWX/X9jraxcMzTFeA/GnZ52QKBgQDtP3SSHWNI0GBubm6R\nav5wNMDDiwJmxwQHBS6KyqdAAKF+ODyZqAuoJu372qePW2oLYQpoGlxOBnX4wwyT\nHApINPRJDuyEr3rj0k3b8rjR17LtVlcOXlPdUYOidWOs7UecGWL4+rxJORLzBrvP\nlHOgFGv3Z0r4YrwwVuJ/wU42NwKBgQDKm8sgErnY6df0fvEOtnFZm0DH0/G8FTpr\nvhPkQbrF0HCGwJpYT7P0USEErmFZQh59Q5JJx+4sXYpubcadkWbOpUGWTfTczntT\nxYI+6dBmX7yUgsnQu9djSqMRb5APBA0Etgoz9PPzdq2aflX0z9CwdFMqjj/DlWxS\nHmv/3mPJ2QKBgQCSrmPdHsxOrX6haCd2Qudy6jqv61cdwjfsOzjuWKMVQA6Yoh5d\nhfdHDGKhDyv/xy4GQQYVHQ8qsnXnyngQ0ApPYGYUcWSsGG5rQpAex6+bFbgrYvFK\nEenZ8Nbo75kjxkQ677swYp1czCu6E9S0X30pYNbrzHIepbTiUiWRhStc+wKBgQCa\nhrglfiLAjZlnoGm6Duvkq8R8o+l6ybYE9rO1I2yP8qngHIWbVS6q6DWGnHki2orm\nfuLT4uiEbdNm5dLV2k/Oy7t6J3rZ7aGiAsGTukB31AzAOAA0cw+Taxlz8uKskSpc\nrXqapfhpd9pwOmrUjKtd6VqE2nlHcm9rMkisnbD+AQKBgCv2kHGWjfu1ZGmGImgP\np5T0RNvpNf0RzYdO0EmbI30rqAcY7ylUdHe+INhtJU3b90qzR608BDp/0QgKJSOT\nDQIDlwsk4MmpiX/E/tbeh8F5pC2U2kmZTT5CPuEZDcRYxNrfrBbc58JB22pKJCqw\ny8717KMzVBHvSyJG5z6ErdX6\n-----END PRIVATE KEY-----\n",
-  "client_email": "firebase-adminsdk-fbsvc@biometric-ams.iam.gserviceaccount.com",
-  "client_id": "116581902296391242261",
-  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-  "token_uri": "https://oauth2.googleapis.com/token",
-  "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
-  "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/firebase-adminsdk-fbsvc%40biometric-ams.iam.gserviceaccount.com",
-  "universe_domain": "googleapis.com"
-}
-)!);
+// Reading/parsing the Firebase secrets happens lazily, inside a function,
+// rather than at the top of the file. If a secret is missing or the JSON
+// is malformed, a top-level throw would crash the *entire module* before
+// it can even register a request handler — which breaks the CORS
+// preflight too, and shows up in the browser as a generic "failed to send
+// a request" with no useful detail. Doing it lazily means a bad secret
+// instead produces a normal JSON error response you can actually read.
+let fbAuthCached: ReturnType<typeof getAuth> | null = null;
+let projectIdCached: string | null = null;
 
-if (!getApps().length) {
-  initializeApp({ credential: cert(SERVICE_ACCOUNT) });
+function getProjectId(): string {
+  if (projectIdCached) return projectIdCached;
+  const id = Deno.env.get("FIREBASE_PROJECT_ID");
+  if (!id) throw new Error("missing_secret_FIREBASE_PROJECT_ID");
+  projectIdCached = id;
+  return id;
 }
-const fbAuth = getAuth();
+
+function getFbAuth() {
+  if (fbAuthCached) return fbAuthCached;
+  const raw = Deno.env.get("FIREBASE_SERVICE_ACCOUNT_JSON");
+  if (!raw) throw new Error("missing_secret_FIREBASE_SERVICE_ACCOUNT_JSON");
+  let serviceAccount: unknown;
+  try {
+    serviceAccount = JSON.parse(raw);
+  } catch {
+    throw new Error("invalid_json_FIREBASE_SERVICE_ACCOUNT_JSON");
+  }
+  if (!getApps().length) {
+    initializeApp({ credential: cert(serviceAccount as object) });
+  }
+  fbAuthCached = getAuth();
+  return fbAuthCached;
+}
 
 const supabaseAdmin = createClient(
   Deno.env.get("SUPABASE_URL")!,
@@ -65,8 +79,8 @@ async function requireAdmin(req: Request): Promise<string> {
   if (!token) throw new Error("missing_token");
 
   const { payload } = await jwtVerify(token, FIREBASE_JWKS, {
-    issuer: `https://securetoken.google.com/${FIREBASE_PROJECT_ID}`,
-    audience: FIREBASE_PROJECT_ID,
+    issuer: `https://securetoken.google.com/${getProjectId()}`,
+    audience: getProjectId(),
   });
   const uid = payload.sub as string;
 
@@ -103,7 +117,7 @@ Deno.serve(async (req) => {
       if (!email || !password || !role) throw new Error("missing_fields");
       if (password.length < 6) throw new Error("password_too_short");
 
-      const userRecord = await fbAuth.createUser({ email, password });
+      const userRecord = await getFbAuth().createUser({ email, password });
 
       const { error } = await supabaseAdmin.from("profiles").insert({
         id: userRecord.uid,
@@ -114,7 +128,7 @@ Deno.serve(async (req) => {
       if (error) {
         // Roll back the Firebase user so we don't leave an orphaned login
         // with no matching profile/role.
-        await fbAuth.deleteUser(userRecord.uid).catch(() => {});
+        await getFbAuth().deleteUser(userRecord.uid).catch(() => {});
         throw error;
       }
 
@@ -125,7 +139,7 @@ Deno.serve(async (req) => {
       const { uid, password } = body;
       if (!uid || !password) throw new Error("missing_fields");
       if (password.length < 6) throw new Error("password_too_short");
-      await fbAuth.updateUser(uid, { password });
+      await getFbAuth().updateUser(uid, { password });
       return json({ ok: true });
     }
 
@@ -143,7 +157,7 @@ Deno.serve(async (req) => {
     if (action === "updateEmail") {
       const { uid, email } = body;
       if (!uid || !email) throw new Error("missing_fields");
-      await fbAuth.updateUser(uid, { email });
+      await getFbAuth().updateUser(uid, { email });
       const { error } = await supabaseAdmin.from("profiles").update({ email }).eq("id", uid);
       if (error) throw error;
       return json({ ok: true });
@@ -152,7 +166,7 @@ Deno.serve(async (req) => {
     if (action === "delete") {
       const { uid } = body;
       if (!uid) throw new Error("missing_fields");
-      await fbAuth.deleteUser(uid).catch(() => {}); // ok if already gone
+      await getFbAuth().deleteUser(uid).catch(() => {}); // ok if already gone
       const { error } = await supabaseAdmin.from("profiles").delete().eq("id", uid);
       if (error) throw error;
       return json({ ok: true });
