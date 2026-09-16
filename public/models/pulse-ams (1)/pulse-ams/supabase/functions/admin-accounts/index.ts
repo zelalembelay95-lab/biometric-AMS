@@ -35,8 +35,8 @@ if (!getApps().length) {
 const fbAuth = getAuth();
 
 const supabaseAdmin = createClient(
-  Deno.env.get("SUPABASE_URL")!,
-  Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
+  Deno.env.get("https://twcapjafodjdnuebcqjk.supabase.co")!,
+  Deno.env.get("sb_secret_3ua0tsL9UA1CCvyzMw5SKg_4EohOu9JY")!
 );
 
 // Verifies the caller's Firebase ID token against Firebase's own public
