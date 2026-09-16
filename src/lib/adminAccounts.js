@@ -1,8 +1,17 @@
 import { supabase } from "./supabase.js";
+import { auth } from "./firebase.js";
 
 async function call(action, payload) {
+  const user = auth.currentUser;
+  if (!user) throw new Error("You must be signed in as an admin to do this.");
+  const token = await user.getIdToken();
+
   const { data, error } = await supabase.functions.invoke("admin-accounts", {
     body: { action, ...payload },
+    // Passed explicitly rather than relying on the client's automatic
+    // accessToken injection, which doesn't reliably reach functions.invoke
+    // the way it reaches regular table queries.
+    headers: { Authorization: `Bearer ${token}` },
   });
   if (error) {
     // On a non-2xx response, supabase-js gives a generic "non-2xx status
