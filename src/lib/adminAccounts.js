@@ -1,6 +1,8 @@
 import { supabase } from "./supabase.js";
 import { auth } from "./firebase.js";
 
+const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
+
 async function call(action, payload) {
   const user = auth.currentUser;
   if (!user) throw new Error("You must be signed in as an admin to do this.");
@@ -8,10 +10,16 @@ async function call(action, payload) {
 
   const { data, error } = await supabase.functions.invoke("admin-accounts", {
     body: { action, ...payload },
-    // Passed explicitly rather than relying on the client's automatic
-    // accessToken injection, which doesn't reliably reach functions.invoke
-    // the way it reaches regular table queries.
-    headers: { Authorization: `Bearer ${token}` },
+    headers: {
+      // Authorization must carry a Supabase-recognized token or Supabase's
+      // own gateway silently blocks the request before it ever reaches our
+      // function (no invocation, no logs — nothing to debug). So the anon
+      // key satisfies that gateway check, and the real Firebase login token
+      // rides along in this separate header, which the gateway ignores but
+      // our function reads.
+      Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+      "X-Firebase-Token": token,
+    },
   });
   if (error) {
     // On a non-2xx response, supabase-js gives a generic "non-2xx status
