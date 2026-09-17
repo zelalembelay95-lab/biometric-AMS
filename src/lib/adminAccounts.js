@@ -6,20 +6,20 @@ const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
 async function call(action, payload) {
   const user = auth.currentUser;
   if (!user) throw new Error("You must be signed in as an admin to do this.");
-  const token = await user.getIdToken();
+  const firebaseToken = await user.getIdToken();
 
+  // The login token travels inside the JSON body, not a header. Two
+  // platform-level restrictions forced this: Supabase's gateway validates
+  // Authorization against its own signing key before the function even
+  // runs (rejecting a Firebase-signed token outright — so Authorization is
+  // explicitly pinned to the Supabase key here instead of being left to
+  // default to the Firebase token), and CORS preflight only allows a fixed
+  // set of headers no function-side config can expand (so nothing new is
+  // added there — the real token rides in the body instead, which neither
+  // restriction touches).
   const { data, error } = await supabase.functions.invoke("admin-accounts", {
-    body: { action, ...payload },
-    headers: {
-      // Authorization must carry a Supabase-recognized token or Supabase's
-      // own gateway silently blocks the request before it ever reaches our
-      // function (no invocation, no logs — nothing to debug). So the anon
-      // key satisfies that gateway check, and the real Firebase login token
-      // rides along in this separate header, which the gateway ignores but
-      // our function reads.
-      Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
-      "X-Firebase-Token": token,
-    },
+    body: { action, firebaseToken, ...payload },
+    headers: { Authorization: `Bearer ${SUPABASE_ANON_KEY}` },
   });
   if (error) {
     // On a non-2xx response, supabase-js gives a generic "non-2xx status
