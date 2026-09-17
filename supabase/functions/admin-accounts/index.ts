@@ -26,40 +26,13 @@ import { getAuth } from "npm:firebase-admin@12/auth";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { createRemoteJWKSet, jwtVerify } from "npm:jose@5";
 
-// Reading/parsing the Firebase secrets happens lazily, inside a function,
-// rather than at the top of the file. If a secret is missing or the JSON
-// is malformed, a top-level throw would crash the *entire module* before
-// it can even register a request handler — which breaks the CORS
-// preflight too, and shows up in the browser as a generic "failed to send
-// a request" with no useful detail. Doing it lazily means a bad secret
-// instead produces a normal JSON error response you can actually read.
-let fbAuthCached: ReturnType<typeof getAuth> | null = null;
-let projectIdCached: string | null = null;
+const FIREBASE_PROJECT_ID = Deno.env.get("FIREBASE_PROJECT_ID")!;
+const SERVICE_ACCOUNT = JSON.parse(Deno.env.get("FIREBASE_SERVICE_ACCOUNT_JSON")!);
 
-function getProjectId(): string {
-  if (projectIdCached) return projectIdCached;
-  const id = Deno.env.get("FIREBASE_PROJECT_ID");
-  if (!id) throw new Error("missing_secret_FIREBASE_PROJECT_ID");
-  projectIdCached = id;
-  return id;
+if (!getApps().length) {
+  initializeApp({ credential: cert(SERVICE_ACCOUNT) });
 }
-
-function getFbAuth() {
-  if (fbAuthCached) return fbAuthCached;
-  const raw = Deno.env.get("FIREBASE_SERVICE_ACCOUNT_JSON");
-  if (!raw) throw new Error("missing_secret_FIREBASE_SERVICE_ACCOUNT_JSON");
-  let serviceAccount: unknown;
-  try {
-    serviceAccount = JSON.parse(raw);
-  } catch {
-    throw new Error("invalid_json_FIREBASE_SERVICE_ACCOUNT_JSON");
-  }
-  if (!getApps().length) {
-    initializeApp({ credential: cert(serviceAccount as object) });
-  }
-  fbAuthCached = getAuth();
-  return fbAuthCached;
-}
+const fbAuth = getAuth();
 
 const supabaseAdmin = createClient(
   Deno.env.get("SUPABASE_URL")!,
@@ -79,8 +52,8 @@ async function requireAdmin(req: Request): Promise<string> {
   if (!token) throw new Error("missing_token");
 
   const { payload } = await jwtVerify(token, FIREBASE_JWKS, {
-    issuer: `https://securetoken.google.com/${getProjectId()}`,
-    audience: getProjectId(),
+    issuer: `https://securetoken.google.com/${FIREBASE_PROJECT_ID}`,
+    audience: FIREBASE_PROJECT_ID,
   });
   const uid = payload.sub as string;
 
@@ -117,7 +90,7 @@ Deno.serve(async (req) => {
       if (!email || !password || !role) throw new Error("missing_fields");
       if (password.length < 6) throw new Error("password_too_short");
 
-      const userRecord = await getFbAuth().createUser({ email, password });
+      const userRecord = await fbAuth.createUser({ email, password });
 
       const { error } = await supabaseAdmin.from("profiles").insert({
         id: userRecord.uid,
@@ -128,7 +101,7 @@ Deno.serve(async (req) => {
       if (error) {
         // Roll back the Firebase user so we don't leave an orphaned login
         // with no matching profile/role.
-        await getFbAuth().deleteUser(userRecord.uid).catch(() => {});
+        await fbAuth.deleteUser(userRecord.uid).catch(() => {});
         throw error;
       }
 
@@ -139,7 +112,7 @@ Deno.serve(async (req) => {
       const { uid, password } = body;
       if (!uid || !password) throw new Error("missing_fields");
       if (password.length < 6) throw new Error("password_too_short");
-      await getFbAuth().updateUser(uid, { password });
+      await fbAuth.updateUser(uid, { password });
       return json({ ok: true });
     }
 
@@ -157,7 +130,7 @@ Deno.serve(async (req) => {
     if (action === "updateEmail") {
       const { uid, email } = body;
       if (!uid || !email) throw new Error("missing_fields");
-      await getFbAuth().updateUser(uid, { email });
+      await fbAuth.updateUser(uid, { email });
       const { error } = await supabaseAdmin.from("profiles").update({ email }).eq("id", uid);
       if (error) throw error;
       return json({ ok: true });
@@ -166,7 +139,7 @@ Deno.serve(async (req) => {
     if (action === "delete") {
       const { uid } = body;
       if (!uid) throw new Error("missing_fields");
-      await getFbAuth().deleteUser(uid).catch(() => {}); // ok if already gone
+      await fbAuth.deleteUser(uid).catch(() => {}); // ok if already gone
       const { error } = await supabaseAdmin.from("profiles").delete().eq("id", uid);
       if (error) throw error;
       return json({ ok: true });
