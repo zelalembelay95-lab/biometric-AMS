@@ -1,6 +1,6 @@
-import { supabase } from "./supabase.js";
 import { auth } from "./firebase.js";
 
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
 async function call(action, payload) {
@@ -8,33 +8,35 @@ async function call(action, payload) {
   if (!user) throw new Error("You must be signed in as an admin to do this.");
   const firebaseToken = await user.getIdToken();
 
-  // The login token travels inside the JSON body, not a header. Two
-  // platform-level restrictions forced this: Supabase's gateway validates
-  // Authorization against its own signing key before the function even
-  // runs (rejecting a Firebase-signed token outright — so Authorization is
-  // explicitly pinned to the Supabase key here instead of being left to
-  // default to the Firebase token), and CORS preflight only allows a fixed
-  // set of headers no function-side config can expand (so nothing new is
-  // added there — the real token rides in the body instead, which neither
-  // restriction touches).
-  const { data, error } = await supabase.functions.invoke("admin-accounts", {
-    body: { action, firebaseToken, ...payload },
-    headers: { Authorization: `Bearer ${SUPABASE_ANON_KEY}` },
+  // Deliberately NOT using supabase.functions.invoke() here, and
+  // deliberately sending no Authorization header at all: Supabase's Edge
+  // Functions gateway runs a built-in check on Authorization before the
+  // function's own code ever executes, and that check only understands
+  // the old JWT-format keys — this project's publishable key isn't
+  // JWT-shaped, so sending it there gets rejected outright ("Invalid
+  // Compact JWS"), and supabase-js's automatic token injection can't be
+  // fully suppressed except by bypassing it with a plain fetch. With
+  // Authorization absent and only apikey present, Supabase's gateway
+  // issues its own temporary pass and forwards the request normally —
+  // our function then does its own real authentication using the
+  // Firebase token carried in the body below.
+  const res = await fetch(`${SUPABASE_URL}/functions/v1/admin-accounts`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      apikey: SUPABASE_ANON_KEY,
+    },
+    body: JSON.stringify({ action, firebaseToken, ...payload }),
   });
-  if (error) {
-    // On a non-2xx response, supabase-js gives a generic "non-2xx status
-    // code" message and tucks the function's actual JSON error body away in
-    // error.context (the raw Response) instead of surfacing it directly —
-    // dig it out so the real reason shows up instead of that generic text.
-    let message = error.message;
-    if (error.context && typeof error.context.json === "function") {
-      try {
-        const body = await error.context.json();
-        if (body?.error) message = body.error;
-      } catch (_) { /* body wasn't JSON — fall back to the generic message */ }
-    }
-    throw new Error(message);
+
+  let data;
+  try {
+    data = await res.json();
+  } catch (_) {
+    throw new Error(`Unexpected response from server (status ${res.status})`);
   }
+
+  if (!res.ok) throw new Error(data?.error || `Request failed (status ${res.status})`);
   if (data?.error) throw new Error(data.error);
   return data;
 }
